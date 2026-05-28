@@ -1,4 +1,4 @@
-// src/components/QuizCollection.jsx
+// src/components/QuizCollection.jsx - Professional Layout
 import React, { useState } from 'react';
 
 const QuizCollection = ({ 
@@ -31,7 +31,7 @@ const QuizCollection = ({
       });
       setEditMode(false);
     } else {
-      alert('Question and answer cannot be empty');
+      alert('Please fill in both question and answer');
     }
   };
 
@@ -42,16 +42,16 @@ const QuizCollection = ({
   return (
     <section className="card" aria-label="Quiz collection">
       <div className="card-header">
-        <h2>📚 Your Quiz Collection</h2>
-        <p className="text-muted" style={{ fontSize: '0.875rem', marginTop: '0.25rem' }}>
-          {quizzes.length} {quizzes.length === 1 ? 'card' : 'cards'} available
-        </p>
+        <h2>
+          Quiz Library
+          <span className="quiz-count">{quizzes.length} cards</span>
+        </h2>
       </div>
       <div className="card-content">
         {quizzes.length === 0 ? (
           <div className="empty-state">
-            <p>🎯 No quizzes yet</p>
-            <p className="text-muted">Create your first visual quiz on the left!</p>
+            <p>📁 No quiz cards yet</p>
+            <p className="text-muted">Create your first visual quiz card</p>
           </div>
         ) : (
           <>
@@ -67,24 +67,26 @@ const QuizCollection = ({
                 >
                   <img 
                     src={quiz.imageUrl} 
-                    alt={`Quiz visual for: ${quiz.question}`}
+                    alt={quiz.question}
                     className="quiz-image"
                   />
-                  <div className="quiz-question">{quiz.question}</div>
-                  <div className="quiz-answer-preview">
-                    <span>Click to reveal answer →</span>
-                    <button
-                      className="delete-button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        if (window.confirm('Delete this quiz card?')) {
-                          onDeleteQuiz(quiz.id);
-                        }
-                      }}
-                      aria-label="Delete quiz"
-                    >
-                      Delete
-                    </button>
+                  <div className="quiz-info">
+                    <div className="quiz-question">{quiz.question}</div>
+                    <div className="quiz-answer-preview">
+                      <span>Click to view details</span>
+                      <button
+                        className="delete-button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm('Delete this quiz card?')) {
+                            onDeleteQuiz(quiz.id);
+                          }
+                        }}
+                        aria-label="Delete quiz"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -92,22 +94,20 @@ const QuizCollection = ({
 
             {selectedQuiz && (
               <div className="answer-section">
-                <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                <div className="button-group">
                   {!editMode ? (
                     <>
                       <button 
                         className="button-secondary" 
                         onClick={onToggleAnswer}
-                        style={{ flex: 1 }}
                       >
-                        {showAnswer ? '🙈 Hide Answer' : '👁️ Show Answer Instantly'}
+                        {showAnswer ? 'Hide Answer' : 'Reveal Answer'}
                       </button>
                       <button 
                         className="button-secondary" 
                         onClick={handleEditStart}
-                        style={{ flex: 1 }}
                       >
-                        ✏️ Edit Card
+                        Edit Card
                       </button>
                     </>
                   ) : (
@@ -115,14 +115,12 @@ const QuizCollection = ({
                       <button 
                         className="button-primary" 
                         onClick={handleEditSave}
-                        style={{ flex: 1 }}
                       >
-                        💾 Save Changes
+                        Save Changes
                       </button>
                       <button 
                         className="button-secondary" 
                         onClick={handleEditCancel}
-                        style={{ flex: 1 }}
                       >
                         Cancel
                       </button>
@@ -132,17 +130,19 @@ const QuizCollection = ({
 
                 {!editMode ? (
                   <div className="current-answer">
-                    <strong>Current Question:</strong> {selectedQuiz.question}
+                    <strong>Current Question:</strong>
+                    <div>{selectedQuiz.question}</div>
                     {showAnswer && (
-                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #dcfce7' }}>
-                        <strong>✅ Answer:</strong> {selectedQuiz.answer}
+                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #bfdbfe' }}>
+                        <strong>Answer:</strong>
+                        <div style={{ marginTop: '0.25rem' }}>{selectedQuiz.answer}</div>
                       </div>
                     )}
                   </div>
                 ) : (
                   <div className="edit-form">
                     <div className="input-group">
-                      <label htmlFor="edit-question">Edit Question</label>
+                      <label htmlFor="edit-question">Question</label>
                       <input
                         id="edit-question"
                         type="text"
@@ -151,7 +151,7 @@ const QuizCollection = ({
                       />
                     </div>
                     <div className="input-group">
-                      <label htmlFor="edit-answer">Edit Answer</label>
+                      <label htmlFor="edit-answer">Answer</label>
                       <textarea
                         id="edit-answer"
                         value={editAnswer}
