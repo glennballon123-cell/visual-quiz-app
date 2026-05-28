@@ -539,3 +539,23 @@ body {
   background: #dc2626;
   transform: translateY(-1px);
 }
+
+/* Math badge */
+.math-badge {
+  display: inline-block;
+  background: #10b981;
+  color: white;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.5rem;
+  font-size: 0.7rem;
+  margin-top: 0.5rem;
+}
+
+.math-tag {
+  background: #10b981;
+  color: white;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.25rem;
+  font-size: 0.6rem;
+  margin-left: 0.5rem;
+}

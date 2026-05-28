@@ -1,10 +1,42 @@
-// src/App.jsx - Quizlet with DeepSeek AI (With STREAMING!)
+// src/App.jsx - With Manual Math Solver (No AI needed!)
 import React, { useState, useEffect, useRef } from 'react';
 import { v4 as generateUniqueId } from 'uuid';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 
 const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
 const genAI = new GoogleGenerativeAI(API_KEY);
+
+// ============ MATH SOLVER (No AI, Pure JavaScript!) ============
+const solveMathProblem = (problem) => {
+  try {
+    // Remove spaces
+    let equation = problem.replace(/\s/g, '');
+    
+    // Handle special math expressions
+    equation = equation.replace(/÷/g, '/');
+    equation = equation.replace(/×/g, '*');
+    equation = equation.replace(/\^/g, '**');
+    
+    // Handle implicit multiplication (like 2(1+2))
+    equation = equation.replace(/(\d+)\(/g, '$1*(');
+    equation = equation.replace(/\)(\d+)/g, ')*$1');
+    
+    // SAFE evaluation using Function (safer than eval)
+    const result = Function('"use strict";return (' + equation + ')')();
+    
+    return {
+      answer: result.toString(),
+      steps: `Step 1: Original problem: ${problem}\nStep 2: ${equation}\nStep 3: = ${result}`,
+      solved: true
+    };
+  } catch (error) {
+    return {
+      answer: null,
+      steps: "Could not solve this equation. Please check the format.",
+      solved: false
+    };
+  }
+};
 
 // ============ FLASHCARD COMPONENT ============
 const Flashcard = ({ card, onFlip, isFlipped }) => {
@@ -21,6 +53,7 @@ const Flashcard = ({ card, onFlip, isFlipped }) => {
             <h4>📖 Answer:</h4>
             <p>{card.answer}</p>
             {card.aiGenerated && <span className="ai-badge">🤖 AI Generated</span>}
+            {card.mathSolved && <span className="math-badge">🧮 Math Solver</span>}
           </div>
         </div>
       </div>
@@ -40,8 +73,8 @@ const TypingIndicator = () => {
   );
 };
 
-// ============ AI ASK COMPONENT (With Streaming) ============
-const AIAskPanel = ({ onAddToQuizlet, aiReady }) => {
+// ============ AI ASK COMPONENT ============
+const AIAskPanel = ({ onAddToQuizlet }) => {
   const [question, setQuestion] = useState('');
   const [streamingAnswer, setStreamingAnswer] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
@@ -51,8 +84,25 @@ const AIAskPanel = ({ onAddToQuizlet, aiReady }) => {
   const [showCustom, setShowCustom] = useState(false);
   const [mathMode, setMathMode] = useState(false);
   const [fullAnswer, setFullAnswer] = useState('');
+  const [aiReady, setAiReady] = useState(false);
+  const [useManualMath, setUseManualMath] = useState(true); // New: Use manual math solver first!
   
   const abortControllerRef = useRef(null);
+
+  // Initialize AI (but we'll use manual math when possible)
+  useEffect(() => {
+    const initAI = async () => {
+      if (!useManualMath) {
+        try {
+          await genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+          setAiReady(true);
+        } catch (error) {
+          console.error("AI init failed:", error);
+        }
+      }
+    };
+    initAI();
+  }, [useManualMath]);
 
   const handleImageUpload = (event) => {
     const file = event.target.files[0];
@@ -66,28 +116,21 @@ const AIAskPanel = ({ onAddToQuizlet, aiReady }) => {
     }
   };
 
-  // Streaming function - shows text word by word
-  const streamText = async (text, onChar) => {
-    const words = text.split(' ');
-    for (let i = 0; i < words.length; i++) {
-      await new Promise(resolve => setTimeout(resolve, 30)); // 30ms per word
-      onChar(words.slice(0, i + 1).join(' '));
-    }
+  // Check if question is a math problem
+  const isMathProblem = (text) => {
+    const mathPatterns = [
+      /[\d\+\-\*\/\(\)\^÷×]+/,  // Numbers and operators
+      /\d+\s*[+\-*/÷×]\s*\d+/,   // Basic operations
+      /\([^)]+\)/,                // Parentheses
+    ];
+    return mathPatterns.some(pattern => pattern.test(text));
   };
 
   const askAI = async () => {
     let userQuestion = showCustom ? customPrompt : (question || "What is shown in this image?");
     
     if (mathMode && !showCustom) {
-      userQuestion = `SOLVE THIS MATH PROBLEM: ${userQuestion}
-
-IMPORTANT RULES:
-- Calculate the answer step by step
-- Show the mathematical steps
-- Give the final answer clearly
-- DO NOT describe the image layout
-- DO NOT say "the image shows"
-- Just SOLVE and EXPLAIN the solution`;
+      userQuestion = `Solve: ${userQuestion}`;
     }
     
     if (!userQuestion.trim()) {
@@ -95,14 +138,36 @@ IMPORTANT RULES:
       return;
     }
     
-    if (!aiReady) {
-      alert("AI is loading. Please wait...");
-      return;
+    // Try manual math solver FIRST (no API, instant!)
+    if (useManualMath && (mathMode || isMathProblem(userQuestion))) {
+      setIsStreaming(true);
+      setStreamingAnswer("");
+      setFullAnswer("");
+      
+      // Simulate streaming effect
+      const mathResult = solveMathProblem(userQuestion);
+      
+      if (mathResult.solved) {
+        const answerText = `🧮 **Math Solver Result:**\n\n${mathResult.steps}\n\n✅ Final Answer: **${mathResult.answer}**`;
+        
+        // Stream the answer word by word
+        const words = answerText.split(' ');
+        let currentText = '';
+        for (let i = 0; i < words.length; i++) {
+          await new Promise(resolve => setTimeout(resolve, 15));
+          currentText += (i === 0 ? words[i] : ' ' + words[i]);
+          setStreamingAnswer(currentText);
+          setFullAnswer(currentText);
+        }
+        setIsStreaming(false);
+        return;
+      }
     }
     
-    // Cancel any ongoing stream
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
+    // If not a math problem or manual math failed, use AI
+    if (!aiReady && !useManualMath) {
+      alert("AI is still loading. Please wait or enable Manual Math mode.");
+      return;
     }
     
     setIsStreaming(true);
@@ -110,27 +175,12 @@ IMPORTANT RULES:
     setFullAnswer("");
     
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
       
       let result;
       if (imageDataUrl) {
         const base64Data = imageDataUrl.split(',')[1];
-        
-        const enhancedPrompt = `${userQuestion}
-
-CRITICAL INSTRUCTIONS:
-1. If this contains a MATH EQUATION, SOLVE IT and give the numerical answer
-2. If this is a QUESTION, ANSWER IT directly
-3. If this is an OBJECT, IDENTIFY it
-4. DO NOT describe the image layout or say "the image shows"
-5. DO NOT just repeat the question
-6. Give the FINAL ANSWER immediately
-
-Examples:
-- Math equation "6 ÷ 2(1+2) = ?" → Answer: "9"
-- "What animal is this?" → Answer: "Cat" or "Dog"
-- "What color is this?" → Answer: "Red"`;
-        
+        const enhancedPrompt = `${userQuestion}\n\nAnswer directly and concisely.`;
         result = await model.generateContentStream([
           enhancedPrompt,
           { inlineData: { mimeType: "image/jpeg", data: base64Data } }
@@ -140,8 +190,6 @@ Examples:
       }
       
       let fullResponse = "";
-      
-      // Stream the response chunk by chunk
       for await (const chunk of result.stream) {
         const chunkText = chunk.text();
         fullResponse += chunkText;
@@ -151,8 +199,14 @@ Examples:
       
     } catch (error) {
       if (error.name !== 'AbortError') {
-        setStreamingAnswer(`Error: ${error.message}`);
-        setFullAnswer(`Error: ${error.message}`);
+        let errorMsg = "Error: ";
+        if (error.message.includes("429") || error.message.includes("quota")) {
+          errorMsg = "⚠️ Daily API limit reached. Use Manual Math mode for math problems!";
+        } else {
+          errorMsg += error.message;
+        }
+        setStreamingAnswer(errorMsg);
+        setFullAnswer(errorMsg);
       }
     } finally {
       setIsStreaming(false);
@@ -168,8 +222,8 @@ Examples:
       return;
     }
     
-    if (!finalAnswer || finalAnswer === "🤔 Thinking..." || isStreaming) {
-      alert("Please wait for AI to finish answering");
+    if (!finalAnswer || finalAnswer.includes("typing") || isStreaming) {
+      alert("Please wait for answer to complete");
       return;
     }
     
@@ -178,13 +232,13 @@ Examples:
       question: finalQuestion,
       answer: finalAnswer,
       image: imageDataUrl || null,
-      aiGenerated: true,
+      aiGenerated: !finalAnswer.includes("Math Solver"),
+      mathSolved: finalAnswer.includes("Math Solver"),
       createdAt: new Date().toISOString()
     };
     
     onAddToQuizlet(card);
     
-    // Clear form
     setQuestion('');
     setCustomPrompt('');
     setStreamingAnswer('');
@@ -193,7 +247,7 @@ Examples:
     setImagePreview('');
     setShowCustom(false);
     setMathMode(false);
-    alert("✅ Added to your Quizlet collection!");
+    alert("✅ Added to your collection!");
   };
 
   const clearAnswer = () => {
@@ -207,12 +261,22 @@ Examples:
   return (
     <div className="ai-panel">
       <div className="panel-header">
-        <h2>🤖 Ask AI Anything</h2>
-        <p>Watch AI answer word by word in real-time!</p>
+        <h2>🤖 Math Solver + AI Assistant</h2>
+        <p>Math problems solved INSTANTLY with NO API!</p>
       </div>
       
       <div className="panel-content">
-        {/* Image Upload */}
+        {/* Manual Math Mode Toggle */}
+        <div className="special-modes">
+          <button 
+            className={`mode-btn ${useManualMath ? 'active' : ''}`}
+            onClick={() => setUseManualMath(!useManualMath)}
+            style={{ background: useManualMath ? '#10b981' : '#1e293b' }}
+          >
+            🧮 Manual Math Solver {useManualMath ? 'ON ✓' : 'OFF'}
+          </button>
+        </div>
+        
         <div className="upload-area" onClick={() => document.getElementById('ai-image-input').click()}>
           {imagePreview ? (
             <img src={imagePreview} alt="Preview" className="upload-preview" />
@@ -233,7 +297,6 @@ Examples:
           )}
         </div>
         
-        {/* Special Mode Buttons */}
         <div className="special-modes">
           <button 
             className={`mode-btn ${mathMode ? 'active' : ''}`} 
@@ -241,7 +304,7 @@ Examples:
               setMathMode(!mathMode);
               if (!mathMode) {
                 setShowCustom(false);
-                setQuestion("Solve this math problem step by step.");
+                setQuestion("6 ÷ 2(1+2)");
               }
             }}
           >
@@ -269,7 +332,6 @@ Examples:
           </button>
         </div>
         
-        {/* Question Type Toggle */}
         <div className="question-type">
           <button className={`type-btn ${!showCustom ? 'active' : ''}`} onClick={() => setShowCustom(false)}>
             📝 Quick Question
@@ -279,12 +341,11 @@ Examples:
           </button>
         </div>
         
-        {/* Question Input */}
         {!showCustom ? (
           <input
             type="text"
             className="question-input"
-            placeholder="e.g., What animal is this? Solve this math problem? Identify this object?"
+            placeholder="e.g., 6 ÷ 2(1+2) = ? or What animal is this?"
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
           />
@@ -292,49 +353,35 @@ Examples:
           <textarea
             className="question-textarea"
             placeholder="Ask ANYTHING! Examples:
-• What breed of cat is this?
-• Is this plant healthy?
 • Solve: 6 ÷ 2(1+2)
-• What's the historical significance of this building?
-• Analyze the colors in this image
-• ANY question you can think of..."
+• What breed of cat is this?
+• Explain quantum physics simply"
             value={customPrompt}
             onChange={(e) => setCustomPrompt(e.target.value)}
             rows="4"
           />
         )}
         
-        {/* Ask and Clear Buttons */}
         <div className="button-group">
-          <button className="ask-button" onClick={askAI} disabled={isStreaming || !aiReady}>
-            {isStreaming ? "📝 AI is typing..." : mathMode ? "🧮 Solve Math!" : "🔍 Ask AI"}
+          <button className="ask-button" onClick={askAI} disabled={isStreaming}>
+            {isStreaming ? "📝 Solving..." : mathMode ? "🧮 Solve Math!" : "🔍 Ask AI"}
           </button>
           {streamingAnswer && (
-            <button className="clear-button" onClick={clearAnswer}>
-              🗑️ Clear
-            </button>
+            <button className="clear-button" onClick={clearAnswer}>🗑️ Clear</button>
           )}
         </div>
         
-        {/* Streaming AI Answer */}
         <div className="ai-answer streaming-area">
           <div className="answer-header">
-            <span>🤖 AI Answer {isStreaming && <span className="streaming-badge">● LIVE</span>}</span>
-            {streamingAnswer && !isStreaming && (
-              <button className="add-btn" onClick={addToQuizlet}>+ Add to Quizlet</button>
+            <span>🤖 Answer {isStreaming && <span className="streaming-badge">● LIVE</span>}</span>
+            {streamingAnswer && !isStreaming && !streamingAnswer.includes("Error") && (
+              <button className="add-btn" onClick={addToQuizlet}>+ Save</button>
             )}
           </div>
           <div className="answer-text streaming-text">
-            {streamingAnswer || (isStreaming ? <TypingIndicator /> : "Ask a question to see the AI answer stream in real-time...")}
+            {streamingAnswer || (isStreaming ? <TypingIndicator /> : "Ask a question... Math problems solved instantly!")}
             {isStreaming && <span className="cursor-blink">▊</span>}
           </div>
-          {isStreaming && (
-            <div className="streaming-progress">
-              <div className="progress-bar">
-                <div className="progress-fill streaming"></div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </div>
@@ -348,15 +395,15 @@ const QuizletCollection = ({ cards, onDeleteCard, onSelectCard, selectedCardId, 
   return (
     <div className="quizlet-panel">
       <div className="panel-header">
-        <h2>📚 My Quizlet Collection</h2>
-        <p>{cards.length} flashcards saved</p>
+        <h2>📚 My Collection</h2>
+        <p>{cards.length} items saved</p>
       </div>
       
       <div className="cards-list">
         {cards.length === 0 ? (
           <div className="empty-state">
-            <p>📖 No flashcards yet</p>
-            <p>Ask AI something and save it to your collection!</p>
+            <p>📖 Nothing saved yet</p>
+            <p>Ask a question and save the answer!</p>
           </div>
         ) : (
           cards.map(card => (
@@ -368,18 +415,18 @@ const QuizletCollection = ({ cards, onDeleteCard, onSelectCard, selectedCardId, 
               {card.image && <img src={card.image} alt="" className="card-thumb" />}
               <div className="card-info">
                 <div className="card-question">{card.question.substring(0, 50)}...</div>
-                {card.aiGenerated && <span className="ai-tag">AI</span>}
+                {card.mathSolved && <span className="math-tag">🧮 Math</span>}
+                {card.aiGenerated && !card.mathSolved && <span className="ai-tag">🤖 AI</span>}
               </div>
               <button className="delete-card" onClick={(e) => {
                 e.stopPropagation();
-                if (confirm('Delete this card?')) onDeleteCard(card.id);
+                if (confirm('Delete this?')) onDeleteCard(card.id);
               }}>🗑️</button>
             </div>
           ))
         )}
       </div>
       
-      {/* Flashcard Display */}
       {selectedCard && (
         <div className="flashcard-container">
           <Flashcard 
@@ -401,23 +448,7 @@ const App = () => {
   });
   const [selectedCardId, setSelectedCardId] = useState(null);
   const [flippedId, setFlippedId] = useState(null);
-  const [aiReady, setAiReady] = useState(false);
 
-  // Load AI
-  useEffect(() => {
-    const initAI = async () => {
-      try {
-        await genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
-        setAiReady(true);
-        console.log("AI Ready!");
-      } catch (error) {
-        console.error("AI init failed:", error);
-      }
-    };
-    initAI();
-  }, []);
-
-  // Save to localStorage
   useEffect(() => {
     localStorage.setItem('quizletCards', JSON.stringify(cards));
   }, [cards]);
@@ -441,16 +472,16 @@ const App = () => {
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>📚 AI Quizlet 🤖</h1>
-        <p>Watch AI answers appear word by word in real-time!</p>
+        <h1>📚 Math Solver + AI Assistant</h1>
+        <p>🧮 Math problems solved INSTANTLY without API! 🤖 AI for everything else</p>
         <div className="ai-status">
-          <span className={`status-led ${aiReady ? 'ready' : 'loading'}`}></span>
-          {aiReady ? 'AI Ready - Streaming enabled!' : 'Loading AI...'}
+          <span className="status-led ready"></span>
+          Manual Math Solver: ON ✓ | Unlimited use!
         </div>
       </header>
 
       <div className="main-layout">
-        <AIAskPanel onAddToQuizlet={addToQuizlet} aiReady={aiReady} />
+        <AIAskPanel onAddToQuizlet={addToQuizlet} />
         <QuizletCollection 
           cards={cards}
           onDeleteCard={deleteCard}
