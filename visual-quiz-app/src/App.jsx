@@ -30,4 +30,16 @@ function App() {
   );
 }
 
+    const handleToggleAnswer = () => {
+      setShowAnswer(!showAnswer);
+      // Add animation class
+      const answerDiv = document.querySelector('.current-answer');
+      if (answerDiv) {
+        answerDiv.classList.add('showing');
+        setTimeout(() => {
+          answerDiv.classList.remove('showing');
+        }, 400);
+      }
+    };
+
 export default App;
