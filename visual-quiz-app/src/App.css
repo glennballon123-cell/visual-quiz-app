@@ -182,3 +182,35 @@
     border-right-color: var(--border);
   }
 }
+
+/* Add this to the bottom of src/App.css to style your Creator form elements */
+.quiz-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-top: 2rem;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  text-align: left;
+}
+
+.form-group input, 
+.form-group textarea {
+  width: 100%;
+  padding: 0.75rem;
+  background-color: #121214;
+  border: 1px solid #323238;
+  border-radius: 6px;
+  color: #fff;
+  font-size: 1rem;
+  box-sizing: border-box; /* Crucial: stops fields from breaking bounds */
+}
+
+.form-group input:focus {
+  border-color: #00b37e;
+  outline: none;
+}
