@@ -1,63 +1,26 @@
-// src/components/QuizCreator.jsx - With Auto AI Detection & Image Compression
+// src/components/QuizCreator.jsx - With Streaming UI
 import React, { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
 
-const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
+const QuizCreator = ({ onAddQuiz, isAnalyzing, modelLoading, streamingAnswer, analysisProgress }) => {
   const [questionText, setQuestionText] = useState('');
   const [answerText, setAnswerText] = useState('');
   const [imageDataUrl, setImageDataUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
   const [autoDetect, setAutoDetect] = useState(true);
 
-  // OPTIMIZED: Compresses images locally using Canvas before API transit
   const handleImageUpload = async (event) => {
     const file = event.target.files[0];
     if (file && file.type.startsWith('image/')) {
       const reader = new FileReader();
-      
       reader.onloadend = () => {
-        const img = new Image();
-        img.src = reader.result;
+        const dataUrl = reader.result;
+        setImageDataUrl(dataUrl);
+        setImagePreview(dataUrl);
         
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          
-          // Max dimension bounds for scaling down
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 800;
-          let width = img.width;
-          let height = img.height;
-          
-          // Constrain layout dimensions proportionally
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
-          
-          canvas.width = width;
-          canvas.height = height;
-          
-          // Paint and condense data down onto Canvas surface
-          ctx.drawImage(img, 0, 0, width, height);
-          
-          // Compress structural output to JPEG at 70% quality scale
-          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.7);
-          
-          setImageDataUrl(compressedDataUrl);
-          setImagePreview(compressedDataUrl);
-          
-          // Clear previous answer when new image uploaded
-          if (autoDetect) {
-            setAnswerText('AI will analyze this image...');
-          }
-        };
+        if (autoDetect) {
+          setAnswerText('🤖 AI will analyze this image with streaming response...');
+        }
       };
       reader.readAsDataURL(file);
     } else {
@@ -82,14 +45,16 @@ const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
     
     await onAddQuiz(newQuiz, autoDetect);
     
-    // Reset form
-    setQuestionText('');
-    setAnswerText('');
-    setImageDataUrl('');
-    setImagePreview('');
-    
-    const fileInput = document.getElementById('image-input');
-    if (fileInput) fileInput.value = '';
+    // Only reset if not auto-detecting or if auto-detect is off
+    if (!autoDetect) {
+      setQuestionText('');
+      setAnswerText('');
+      setImageDataUrl('');
+      setImagePreview('');
+      
+      const fileInput = document.getElementById('image-input');
+      if (fileInput) fileInput.value = '';
+    }
   };
 
   const triggerFileUpload = () => {
@@ -106,7 +71,7 @@ const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
           <div className="image-upload-area" onClick={triggerFileUpload}>
             <div className="upload-icon">🖼️</div>
             <p>Click to upload an image</p>
-            <p className="text-muted">Supports JPG, PNG, GIF - AI will analyze automatically!</p>
+            <p className="text-muted">Supports JPG, PNG, GIF - AI will stream analysis in real-time!</p>
             <input
               id="image-input"
               type="file"
@@ -122,6 +87,30 @@ const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
             )}
           </div>
 
+          {/* Model status */}
+          {modelLoading && (
+            <div className="model-loading">
+              <div className="loading-spinner"></div>
+              <p>Loading AI model with WebGL acceleration...</p>
+            </div>
+          )}
+
+          {/* Streaming AI Analysis Display */}
+          {isAnalyzing && streamingAnswer && (
+            <div className="streaming-analysis">
+              <div className="streaming-header">
+                <span>🤖 AI Streaming Analysis</span>
+                <span className="progress-badge">{analysisProgress}%</span>
+              </div>
+              <div className="progress-bar">
+                <div className="progress-fill" style={{ width: `${analysisProgress}%` }}></div>
+              </div>
+              <div className="streaming-content">
+                <ReactMarkdown>{streamingAnswer}</ReactMarkdown>
+              </div>
+            </div>
+          )}
+
           {/* Auto-detect toggle */}
           <div className="input-group">
             <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
@@ -131,10 +120,10 @@ const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
                 onChange={(e) => setAutoDetect(e.target.checked)}
                 style={{ width: 'auto', marginRight: '0.5rem' }}
               />
-              🤖 Auto-detect answer from image (AI analyzes automatically)
+              🚀 Async AI with Real-time Streaming
             </label>
             <p className="text-muted" style={{ fontSize: '0.7rem', marginTop: '0.25rem' }}>
-              When enabled, AI will automatically identify what's in the image
+              AI analyzes with progress updates and streams results in real-time
             </p>
           </div>
 
@@ -145,36 +134,39 @@ const QuizCreator = ({ onAddQuiz, isAnalyzing }) => {
               type="text"
               value={questionText}
               onChange={(e) => setQuestionText(e.target.value)}
-              placeholder="e.g., What is shown in this image? (leave empty for auto)"
+              placeholder="e.g., What is shown in this image?"
               disabled={isAnalyzing}
             />
           </div>
 
           <div className="input-group">
             <label htmlFor="answer">
-              Correct Answer {autoDetect && <span style={{ color: '#a78bfa' }}>(AI will generate)</span>}
+              Correct Answer {autoDetect && <span style={{ color: '#a78bfa' }}>(AI streams response)</span>}
             </label>
             <textarea
               id="answer"
               value={answerText}
               onChange={(e) => setAnswerText(e.target.value)}
-              placeholder={autoDetect ? "AI will automatically analyze the image..." : "Enter the correct answer"}
+              placeholder={autoDetect ? "AI will stream the analysis in real-time..." : "Enter the correct answer"}
               disabled={isAnalyzing || autoDetect}
             />
           </div>
 
-          <button type="submit" className="button-primary" disabled={isAnalyzing}>
-            {isAnalyzing ? (
-              <>🤖 AI Analyzing Image...</>
+          <button type="submit" className="button-primary" disabled={isAnalyzing || modelLoading}>
+            {modelLoading ? (
+              <>📥 Loading AI Model...</>
+            ) : isAnalyzing ? (
+              <>⚡ AI Streaming Analysis... {analysisProgress}%</>
             ) : (
-              <>✨ Create AI Quiz Card</>
+              <>✨ Create Quiz with Async AI</>
             )}
           </button>
           
           {isAnalyzing && (
-            <p className="text-muted" style={{ textAlign: 'center', marginTop: '0.75rem' }}>
-              AI is analyzing your image...
-            </p>
+            <div className="analyzing-status">
+              <div className="pulse-dot"></div>
+              <p>AI is processing with async streaming...</p>
+            </div>
           )}
         </form>
       </div>
