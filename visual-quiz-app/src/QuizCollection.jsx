@@ -1,4 +1,4 @@
-// src/components/QuizCollection.jsx - Professional Layout
+// src/components/QuizCollection.jsx - Professional Flashcard Layout
 import React, { useState } from 'react';
 
 const QuizCollection = ({ 
@@ -43,15 +43,15 @@ const QuizCollection = ({
     <section className="card" aria-label="Quiz collection">
       <div className="card-header">
         <h2>
-          Quiz Library
+          Flashcard Library
           <span className="quiz-count">{quizzes.length} cards</span>
         </h2>
       </div>
       <div className="card-content">
         {quizzes.length === 0 ? (
           <div className="empty-state">
-            <p>📁 No quiz cards yet</p>
-            <p className="text-muted">Create your first visual quiz card</p>
+            <p>🎴 No flashcards yet</p>
+            <p className="text-muted">Create your first flashcard by uploading an image</p>
           </div>
         ) : (
           <>
@@ -73,12 +73,12 @@ const QuizCollection = ({
                   <div className="quiz-info">
                     <div className="quiz-question">{quiz.question}</div>
                     <div className="quiz-answer-preview">
-                      <span>Click to view details</span>
+                      <span>Click to reveal answer →</span>
                       <button
                         className="delete-button"
                         onClick={(e) => {
                           e.stopPropagation();
-                          if (window.confirm('Delete this quiz card?')) {
+                          if (window.confirm('Delete this flashcard?')) {
                             onDeleteQuiz(quiz.id);
                           }
                         }}
@@ -101,13 +101,13 @@ const QuizCollection = ({
                         className="button-secondary" 
                         onClick={onToggleAnswer}
                       >
-                        {showAnswer ? 'Hide Answer' : 'Reveal Answer'}
+                        {showAnswer ? '📖 Hide Answer' : '🔍 Reveal Answer'}
                       </button>
                       <button 
                         className="button-secondary" 
                         onClick={handleEditStart}
                       >
-                        Edit Card
+                        ✏️ Edit Card
                       </button>
                     </>
                   ) : (
@@ -116,7 +116,7 @@ const QuizCollection = ({
                         className="button-primary" 
                         onClick={handleEditSave}
                       >
-                        Save Changes
+                        💾 Save Changes
                       </button>
                       <button 
                         className="button-secondary" 
@@ -130,12 +130,12 @@ const QuizCollection = ({
 
                 {!editMode ? (
                   <div className="current-answer">
-                    <strong>Current Question:</strong>
+                    <strong>Current Question</strong>
                     <div>{selectedQuiz.question}</div>
                     {showAnswer && (
-                      <div style={{ marginTop: '0.75rem', paddingTop: '0.75rem', borderTop: '1px solid #bfdbfe' }}>
-                        <strong>Answer:</strong>
-                        <div style={{ marginTop: '0.25rem' }}>{selectedQuiz.answer}</div>
+                      <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid rgba(139, 92, 246, 0.2)' }}>
+                        <strong>Answer</strong>
+                        <div style={{ marginTop: '0.5rem' }}>{selectedQuiz.answer}</div>
                       </div>
                     )}
                   </div>
