@@ -1,227 +1,463 @@
-// src/App.jsx - Advanced Async Streaming AI
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+// src/App.jsx - Quizlet with DeepSeek AI (With STREAMING!)
+import React, { useState, useEffect, useRef } from 'react';
 import { v4 as generateUniqueId } from 'uuid';
-import * as mobilenet from '@tensorflow-models/mobilenet';
-import * as tf from '@tensorflow/tfjs';
-import QuizCreator from "./QuizCreator";
-import QuizCollection from "./QuizCollection";
+import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const App = () => {
-  const [quizzes, setQuizzes] = useState(() => {
-    const storedQuizzes = localStorage.getItem('visualQuizzes');
-    return storedQuizzes ? JSON.parse(storedQuizzes) : [];
-  });
-  
-  const [selectedQuizId, setSelectedQuizId] = useState(null);
-  const [showAnswer, setShowAnswer] = useState(false);
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [model, setModel] = useState(null);
-  const [modelLoading, setModelLoading] = useState(true);
+const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
+const genAI = new GoogleGenerativeAI(API_KEY);
+
+// ============ FLASHCARD COMPONENT ============
+const Flashcard = ({ card, onFlip, isFlipped }) => {
+  return (
+    <div className={`flashcard ${isFlipped ? 'flipped' : ''}`} onClick={onFlip}>
+      <div className="flashcard-inner">
+        <div className="flashcard-front">
+          {card.image && <img src={card.image} alt="Card" className="card-image" />}
+          <h3>{card.question}</h3>
+          <p className="flip-hint">👆 Click to reveal answer</p>
+        </div>
+        <div className="flashcard-back">
+          <div className="answer-content">
+            <h4>📖 Answer:</h4>
+            <p>{card.answer}</p>
+            {card.aiGenerated && <span className="ai-badge">🤖 AI Generated</span>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============ TYPING INDICATOR COMPONENT ============
+const TypingIndicator = () => {
+  return (
+    <div className="typing-indicator">
+      <span></span>
+      <span></span>
+      <span></span>
+      <span>AI is typing...</span>
+    </div>
+  );
+};
+
+// ============ AI ASK COMPONENT (With Streaming) ============
+const AIAskPanel = ({ onAddToQuizlet, aiReady }) => {
+  const [question, setQuestion] = useState('');
   const [streamingAnswer, setStreamingAnswer] = useState('');
-  const [analysisProgress, setAnalysisProgress] = useState(0);
+  const [isStreaming, setIsStreaming] = useState(false);
+  const [imageDataUrl, setImageDataUrl] = useState('');
+  const [imagePreview, setImagePreview] = useState('');
+  const [customPrompt, setCustomPrompt] = useState('');
+  const [showCustom, setShowCustom] = useState(false);
+  const [mathMode, setMathMode] = useState(false);
+  const [fullAnswer, setFullAnswer] = useState('');
   
   const abortControllerRef = useRef(null);
 
-  // Load MobileNet model on startup
-  useEffect(() => {
-    const loadModel = async () => {
-      try {
-        await tf.ready();
-        await tf.setBackend('webgl');
-        const loadedModel = await mobilenet.load();
-        setModel(loadedModel);
-        setModelLoading(false);
-        console.log("AI Model ready with WebGL backend");
-      } catch (error) {
-        console.error("Model loading failed:", error);
-        setModelLoading(false);
-      }
-    };
-    loadModel();
-    
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-    };
-  }, []);
-
-  // Save to local storage with async debounce
-  useEffect(() => {
-    const saveTimeout = setTimeout(() => {
-      localStorage.setItem('visualQuizzes', JSON.stringify(quizzes));
-    }, 500);
-    
-    return () => clearTimeout(saveTimeout);
-  }, [quizzes]);
-
-  // Streaming image analysis with progress updates
-  const analyzeImageStreaming = useCallback(async (imageDataUrl, onProgress, onChunk) => {
-    if (!model) {
-      return "AI model is still loading...";
-    }
-    
-    return new Promise(async (resolve, reject) => {
-      abortControllerRef.current = new AbortController();
-      
-      try {
-        // Step 1: Load image (10%)
-        onProgress(10);
-        await new Promise(r => setTimeout(r, 50));
-        
-        const img = new Image();
-        img.src = imageDataUrl;
-        
-        // Step 2: Wait for image load (30%)
-        await new Promise((resolveImg) => {
-          img.onload = resolveImg;
-        });
-        onProgress(30);
-        await new Promise(r => setTimeout(r, 50));
-        
-        // Step 3: Preprocess image (50%)
-        onProgress(50);
-        onChunk("📸 Analyzing image...");
-        await new Promise(r => setTimeout(r, 100));
-        
-        // Step 4: Run classification (70%)
-        onProgress(70);
-        onChunk("🧠 Running AI recognition...");
-        
-        const predictions = await model.classify(img);
-        onProgress(90);
-        
-        // Step 5: Process results (100%)
-        if (predictions && predictions.length > 0) {
-          const topPredictions = predictions.slice(0, 3);
-          
-          // Stream each prediction
-          onChunk("🔍 **Top Matches Found:**\n");
-          
-          for (let i = 0; i < topPredictions.length; i++) {
-            const pred = topPredictions[i];
-            const confidence = (pred.probability * 100).toFixed(1);
-            await new Promise(r => setTimeout(r, 100));
-            onChunk(`${i === 0 ? '✓' : '•'} **${pred.className}** - ${confidence}% confidence\n`);
-          }
-          
-          const bestMatch = `${topPredictions[0].className} (${(topPredictions[0].probability * 100).toFixed(1)}% confidence)`;
-          onProgress(100);
-          resolve(bestMatch);
-        } else {
-          resolve("Could not identify the image. Please add answer manually.");
-        }
-      } catch (error) {
-        if (error.name === 'AbortError') {
-          reject(new Error('Analysis cancelled'));
-        } else {
-          console.error("Analysis failed:", error);
-          reject(new Error('Analysis failed'));
-        }
-      }
-    });
-  }, [model]);
-
-  // Add quiz with streaming AI
-  const addQuiz = useCallback(async (newQuiz, autoDetect = true) => {
-    if (autoDetect && model && !newQuiz.answer.trim()) {
-      setIsAnalyzing(true);
-      setStreamingAnswer('');
-      setAnalysisProgress(0);
-      
-      try {
-        // Simulate streaming response
-        const streamAnswer = await analyzeImageStreaming(
-          newQuiz.imageUrl,
-          (progress) => setAnalysisProgress(progress),
-          (chunk) => setStreamingAnswer(prev => prev + chunk)
-        );
-        
-        const quizWithId = {
-          ...newQuiz,
-          id: generateUniqueId(),
-          question: newQuiz.question.trim() || "What is shown in this image?",
-          answer: streamAnswer,
-          aiConfidence: true,
-          createdAt: new Date().toISOString()
-        };
-        
-        setQuizzes(prev => [quizWithId, ...prev]);
-        setSelectedQuizId(quizWithId.id);
-        setShowAnswer(false);
-        
-        // Clear streaming after 3 seconds
-        setTimeout(() => {
-          setStreamingAnswer('');
-          setAnalysisProgress(0);
-        }, 3000);
-        
-      } catch (error) {
-        console.error("AI analysis failed:", error);
-        const quizWithId = {
-          ...newQuiz,
-          id: generateUniqueId(),
-          question: newQuiz.question.trim() || "What is shown in this image?",
-          answer: "AI analysis failed. Please enter answer manually.",
-          createdAt: new Date().toISOString()
-        };
-        setQuizzes(prev => [quizWithId, ...prev]);
-      } finally {
-        setIsAnalyzing(false);
-      }
-    } else {
-      const quizWithId = {
-        ...newQuiz,
-        id: generateUniqueId(),
-        createdAt: new Date().toISOString()
+  const handleImageUpload = (event) => {
+    const file = event.target.files[0];
+    if (file && file.type.startsWith('image/')) {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        setImageDataUrl(reader.result);
+        setImagePreview(reader.result);
       };
-      setQuizzes(prev => [quizWithId, ...prev]);
-      setSelectedQuizId(quizWithId.id);
-      setShowAnswer(false);
+      reader.readAsDataURL(file);
     }
-  }, [model, analyzeImageStreaming]);
+  };
 
-  const deleteQuiz = useCallback((id) => {
-    setQuizzes(prev => prev.filter(quiz => quiz.id !== id));
-    if (selectedQuizId === id) {
-      setSelectedQuizId(quizzes.length > 1 ? quizzes[0]?.id : null);
-      setShowAnswer(false);
+  // Streaming function - shows text word by word
+  const streamText = async (text, onChar) => {
+    const words = text.split(' ');
+    for (let i = 0; i < words.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 30)); // 30ms per word
+      onChar(words.slice(0, i + 1).join(' '));
     }
-  }, [selectedQuizId, quizzes]);
+  };
 
-  const updateQuiz = useCallback((id, updatedData) => {
-    setQuizzes(prev => prev.map(quiz => 
-      quiz.id === id ? { ...quiz, ...updatedData, updatedAt: new Date().toISOString() } : quiz
-    ));
+  const askAI = async () => {
+    let userQuestion = showCustom ? customPrompt : (question || "What is shown in this image?");
+    
+    if (mathMode && !showCustom) {
+      userQuestion = `SOLVE THIS MATH PROBLEM: ${userQuestion}
+
+IMPORTANT RULES:
+- Calculate the answer step by step
+- Show the mathematical steps
+- Give the final answer clearly
+- DO NOT describe the image layout
+- DO NOT say "the image shows"
+- Just SOLVE and EXPLAIN the solution`;
+    }
+    
+    if (!userQuestion.trim()) {
+      alert("Please type a question");
+      return;
+    }
+    
+    if (!aiReady) {
+      alert("AI is loading. Please wait...");
+      return;
+    }
+    
+    // Cancel any ongoing stream
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+    
+    setIsStreaming(true);
+    setStreamingAnswer("");
+    setFullAnswer("");
+    
+    try {
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash-lite" });
+      
+      let result;
+      if (imageDataUrl) {
+        const base64Data = imageDataUrl.split(',')[1];
+        
+        const enhancedPrompt = `${userQuestion}
+
+CRITICAL INSTRUCTIONS:
+1. If this contains a MATH EQUATION, SOLVE IT and give the numerical answer
+2. If this is a QUESTION, ANSWER IT directly
+3. If this is an OBJECT, IDENTIFY it
+4. DO NOT describe the image layout or say "the image shows"
+5. DO NOT just repeat the question
+6. Give the FINAL ANSWER immediately
+
+Examples:
+- Math equation "6 ÷ 2(1+2) = ?" → Answer: "9"
+- "What animal is this?" → Answer: "Cat" or "Dog"
+- "What color is this?" → Answer: "Red"`;
+        
+        result = await model.generateContentStream([
+          enhancedPrompt,
+          { inlineData: { mimeType: "image/jpeg", data: base64Data } }
+        ]);
+      } else {
+        result = await model.generateContentStream(userQuestion);
+      }
+      
+      let fullResponse = "";
+      
+      // Stream the response chunk by chunk
+      for await (const chunk of result.stream) {
+        const chunkText = chunk.text();
+        fullResponse += chunkText;
+        setStreamingAnswer(fullResponse);
+        setFullAnswer(fullResponse);
+      }
+      
+    } catch (error) {
+      if (error.name !== 'AbortError') {
+        setStreamingAnswer(`Error: ${error.message}`);
+        setFullAnswer(`Error: ${error.message}`);
+      }
+    } finally {
+      setIsStreaming(false);
+    }
+  };
+
+  const addToQuizlet = () => {
+    const finalQuestion = question.trim() || customPrompt.trim();
+    const finalAnswer = fullAnswer || streamingAnswer;
+    
+    if (!finalQuestion) {
+      alert("Please ask a question first");
+      return;
+    }
+    
+    if (!finalAnswer || finalAnswer === "🤔 Thinking..." || isStreaming) {
+      alert("Please wait for AI to finish answering");
+      return;
+    }
+    
+    const card = {
+      id: generateUniqueId(),
+      question: finalQuestion,
+      answer: finalAnswer,
+      image: imageDataUrl || null,
+      aiGenerated: true,
+      createdAt: new Date().toISOString()
+    };
+    
+    onAddToQuizlet(card);
+    
+    // Clear form
+    setQuestion('');
+    setCustomPrompt('');
+    setStreamingAnswer('');
+    setFullAnswer('');
+    setImageDataUrl('');
+    setImagePreview('');
+    setShowCustom(false);
+    setMathMode(false);
+    alert("✅ Added to your Quizlet collection!");
+  };
+
+  const clearAnswer = () => {
+    setStreamingAnswer('');
+    setFullAnswer('');
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+  };
+
+  return (
+    <div className="ai-panel">
+      <div className="panel-header">
+        <h2>🤖 Ask AI Anything</h2>
+        <p>Watch AI answer word by word in real-time!</p>
+      </div>
+      
+      <div className="panel-content">
+        {/* Image Upload */}
+        <div className="upload-area" onClick={() => document.getElementById('ai-image-input').click()}>
+          {imagePreview ? (
+            <img src={imagePreview} alt="Preview" className="upload-preview" />
+          ) : (
+            <>
+              <span className="upload-icon">📸</span>
+              <p>Click to upload an image (optional)</p>
+              <small>Upload a picture to ask questions about it</small>
+            </>
+          )}
+          <input id="ai-image-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
+          {imagePreview && (
+            <button className="remove-image" onClick={(e) => {
+              e.stopPropagation();
+              setImageDataUrl('');
+              setImagePreview('');
+            }}>✕</button>
+          )}
+        </div>
+        
+        {/* Special Mode Buttons */}
+        <div className="special-modes">
+          <button 
+            className={`mode-btn ${mathMode ? 'active' : ''}`} 
+            onClick={() => {
+              setMathMode(!mathMode);
+              if (!mathMode) {
+                setShowCustom(false);
+                setQuestion("Solve this math problem step by step.");
+              }
+            }}
+          >
+            🧮 Math Solver Mode
+          </button>
+          <button 
+            className="mode-btn" 
+            onClick={() => {
+              setMathMode(false);
+              setShowCustom(false);
+              setQuestion("Identify this object. What is it?");
+            }}
+          >
+            🔍 Identify Object
+          </button>
+          <button 
+            className="mode-btn" 
+            onClick={() => {
+              setMathMode(false);
+              setShowCustom(false);
+              setQuestion("Describe what you see in detail.");
+            }}
+          >
+            📝 Describe Image
+          </button>
+        </div>
+        
+        {/* Question Type Toggle */}
+        <div className="question-type">
+          <button className={`type-btn ${!showCustom ? 'active' : ''}`} onClick={() => setShowCustom(false)}>
+            📝 Quick Question
+          </button>
+          <button className={`type-btn ${showCustom ? 'active' : ''}`} onClick={() => setShowCustom(true)}>
+            🎯 Ask Anything (Custom)
+          </button>
+        </div>
+        
+        {/* Question Input */}
+        {!showCustom ? (
+          <input
+            type="text"
+            className="question-input"
+            placeholder="e.g., What animal is this? Solve this math problem? Identify this object?"
+            value={question}
+            onChange={(e) => setQuestion(e.target.value)}
+          />
+        ) : (
+          <textarea
+            className="question-textarea"
+            placeholder="Ask ANYTHING! Examples:
+• What breed of cat is this?
+• Is this plant healthy?
+• Solve: 6 ÷ 2(1+2)
+• What's the historical significance of this building?
+• Analyze the colors in this image
+• ANY question you can think of..."
+            value={customPrompt}
+            onChange={(e) => setCustomPrompt(e.target.value)}
+            rows="4"
+          />
+        )}
+        
+        {/* Ask and Clear Buttons */}
+        <div className="button-group">
+          <button className="ask-button" onClick={askAI} disabled={isStreaming || !aiReady}>
+            {isStreaming ? "📝 AI is typing..." : mathMode ? "🧮 Solve Math!" : "🔍 Ask AI"}
+          </button>
+          {streamingAnswer && (
+            <button className="clear-button" onClick={clearAnswer}>
+              🗑️ Clear
+            </button>
+          )}
+        </div>
+        
+        {/* Streaming AI Answer */}
+        <div className="ai-answer streaming-area">
+          <div className="answer-header">
+            <span>🤖 AI Answer {isStreaming && <span className="streaming-badge">● LIVE</span>}</span>
+            {streamingAnswer && !isStreaming && (
+              <button className="add-btn" onClick={addToQuizlet}>+ Add to Quizlet</button>
+            )}
+          </div>
+          <div className="answer-text streaming-text">
+            {streamingAnswer || (isStreaming ? <TypingIndicator /> : "Ask a question to see the AI answer stream in real-time...")}
+            {isStreaming && <span className="cursor-blink">▊</span>}
+          </div>
+          {isStreaming && (
+            <div className="streaming-progress">
+              <div className="progress-bar">
+                <div className="progress-fill streaming"></div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// ============ QUIZLET COLLECTION ============
+const QuizletCollection = ({ cards, onDeleteCard, onSelectCard, selectedCardId, onFlip, flippedId }) => {
+  const selectedCard = cards.find(c => c.id === selectedCardId);
+  
+  return (
+    <div className="quizlet-panel">
+      <div className="panel-header">
+        <h2>📚 My Quizlet Collection</h2>
+        <p>{cards.length} flashcards saved</p>
+      </div>
+      
+      <div className="cards-list">
+        {cards.length === 0 ? (
+          <div className="empty-state">
+            <p>📖 No flashcards yet</p>
+            <p>Ask AI something and save it to your collection!</p>
+          </div>
+        ) : (
+          cards.map(card => (
+            <div 
+              key={card.id} 
+              className={`card-item ${selectedCardId === card.id ? 'active' : ''}`}
+              onClick={() => onSelectCard(card.id)}
+            >
+              {card.image && <img src={card.image} alt="" className="card-thumb" />}
+              <div className="card-info">
+                <div className="card-question">{card.question.substring(0, 50)}...</div>
+                {card.aiGenerated && <span className="ai-tag">AI</span>}
+              </div>
+              <button className="delete-card" onClick={(e) => {
+                e.stopPropagation();
+                if (confirm('Delete this card?')) onDeleteCard(card.id);
+              }}>🗑️</button>
+            </div>
+          ))
+        )}
+      </div>
+      
+      {/* Flashcard Display */}
+      {selectedCard && (
+        <div className="flashcard-container">
+          <Flashcard 
+            card={selectedCard} 
+            isFlipped={flippedId === selectedCard.id}
+            onFlip={() => onFlip(selectedCard.id)}
+          />
+        </div>
+      )}
+    </div>
+  );
+};
+
+// ============ MAIN APP ============
+const App = () => {
+  const [cards, setCards] = useState(() => {
+    const saved = localStorage.getItem('quizletCards');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [selectedCardId, setSelectedCardId] = useState(null);
+  const [flippedId, setFlippedId] = useState(null);
+  const [aiReady, setAiReady] = useState(false);
+
+  // Load AI
+  useEffect(() => {
+    const initAI = async () => {
+      try {
+        await genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+        setAiReady(true);
+        console.log("AI Ready!");
+      } catch (error) {
+        console.error("AI init failed:", error);
+      }
+    };
+    initAI();
   }, []);
 
-  const selectedQuiz = quizzes.find(quiz => quiz.id === selectedQuizId);
+  // Save to localStorage
+  useEffect(() => {
+    localStorage.setItem('quizletCards', JSON.stringify(cards));
+  }, [cards]);
+
+  const addToQuizlet = (card) => {
+    setCards(prev => [card, ...prev]);
+    setSelectedCardId(card.id);
+  };
+
+  const deleteCard = (id) => {
+    setCards(prev => prev.filter(c => c.id !== id));
+    if (selectedCardId === id) {
+      setSelectedCardId(cards[0]?.id || null);
+    }
+  };
+
+  const handleFlip = (id) => {
+    setFlippedId(flippedId === id ? null : id);
+  };
 
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>🚀 AI Visual Quiz Studio Pro</h1>
-        <p>Async AI with real-time streaming | Instant image recognition</p>
+        <h1>📚 AI Quizlet 🤖</h1>
+        <p>Watch AI answers appear word by word in real-time!</p>
+        <div className="ai-status">
+          <span className={`status-led ${aiReady ? 'ready' : 'loading'}`}></span>
+          {aiReady ? 'AI Ready - Streaming enabled!' : 'Loading AI...'}
+        </div>
       </header>
 
-      <div className="quiz-layout">
-        <QuizCreator 
-          onAddQuiz={addQuiz} 
-          isAnalyzing={isAnalyzing}
-          modelLoading={modelLoading}
-          streamingAnswer={streamingAnswer}
-          analysisProgress={analysisProgress}
-        />
-        
-        <QuizCollection 
-          quizzes={quizzes}
-          selectedQuizId={selectedQuizId}
-          onSelectQuiz={setSelectedQuizId}
-          onDeleteQuiz={deleteQuiz}
-          selectedQuiz={selectedQuiz}
-          showAnswer={showAnswer}
-          onToggleAnswer={() => setShowAnswer(!showAnswer)}
-          onUpdateQuiz={updateQuiz}
+      <div className="main-layout">
+        <AIAskPanel onAddToQuizlet={addToQuizlet} aiReady={aiReady} />
+        <QuizletCollection 
+          cards={cards}
+          onDeleteCard={deleteCard}
+          onSelectCard={setSelectedCardId}
+          selectedCardId={selectedCardId}
+          onFlip={handleFlip}
+          flippedId={flippedId}
         />
       </div>
     </div>
