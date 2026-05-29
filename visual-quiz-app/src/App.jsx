@@ -1,44 +1,25 @@
-// src/App.jsx - With Manual Math Solver (No AI needed!)
-import React, { useState, useEffect, useRef } from 'react';
+// src/App.jsx - SOLVES math problems IN images!
+import React, { useState, useEffect } from 'react';
 import { v4 as generateUniqueId } from 'uuid';
-import { GoogleGenerativeAI } from '@google/generative-ai';
 
-const API_KEY = import.meta.env.VITE_GEMINI_API_KEY;
-const genAI = new GoogleGenerativeAI(API_KEY);
-
-// ============ MATH SOLVER (No AI, Pure JavaScript!) ============
+// ============ MATH SOLVER ============
 const solveMathProblem = (problem) => {
   try {
-    // Remove spaces
     let equation = problem.replace(/\s/g, '');
-    
-    // Handle special math expressions
     equation = equation.replace(/÷/g, '/');
     equation = equation.replace(/×/g, '*');
     equation = equation.replace(/\^/g, '**');
-    
-    // Handle implicit multiplication (like 2(1+2))
     equation = equation.replace(/(\d+)\(/g, '$1*(');
     equation = equation.replace(/\)(\d+)/g, ')*$1');
     
-    // SAFE evaluation using Function (safer than eval)
     const result = Function('"use strict";return (' + equation + ')')();
-    
-    return {
-      answer: result.toString(),
-      steps: `Step 1: Original problem: ${problem}\nStep 2: ${equation}\nStep 3: = ${result}`,
-      solved: true
-    };
+    return { answer: result.toString(), solved: true };
   } catch (error) {
-    return {
-      answer: null,
-      steps: "Could not solve this equation. Please check the format.",
-      solved: false
-    };
+    return { answer: null, solved: false };
   }
 };
 
-// ============ FLASHCARD COMPONENT ============
+// ============ FLASHCARD ============
 const Flashcard = ({ card, onFlip, isFlipped }) => {
   return (
     <div className={`flashcard ${isFlipped ? 'flipped' : ''}`} onClick={onFlip}>
@@ -52,8 +33,7 @@ const Flashcard = ({ card, onFlip, isFlipped }) => {
           <div className="answer-content">
             <h4>📖 Answer:</h4>
             <p>{card.answer}</p>
-            {card.aiGenerated && <span className="ai-badge">🤖 AI Generated</span>}
-            {card.mathSolved && <span className="math-badge">🧮 Math Solver</span>}
+            {card.mathSolved && <span className="math-badge">🧮 Math</span>}
           </div>
         </div>
       </div>
@@ -61,49 +41,26 @@ const Flashcard = ({ card, onFlip, isFlipped }) => {
   );
 };
 
-// ============ TYPING INDICATOR COMPONENT ============
+// ============ TYPING INDICATOR ============
 const TypingIndicator = () => {
   return (
     <div className="typing-indicator">
-      <span></span>
-      <span></span>
-      <span></span>
-      <span>AI is typing...</span>
+      <span></span><span></span><span></span><span>...</span>
     </div>
   );
 };
 
-// ============ AI ASK COMPONENT ============
+// ============ MAIN AI PANEL ============
 const AIAskPanel = ({ onAddToQuizlet }) => {
   const [question, setQuestion] = useState('');
   const [streamingAnswer, setStreamingAnswer] = useState('');
   const [isStreaming, setIsStreaming] = useState(false);
   const [imageDataUrl, setImageDataUrl] = useState('');
   const [imagePreview, setImagePreview] = useState('');
-  const [customPrompt, setCustomPrompt] = useState('');
-  const [showCustom, setShowCustom] = useState(false);
   const [mathMode, setMathMode] = useState(false);
   const [fullAnswer, setFullAnswer] = useState('');
-  const [aiReady, setAiReady] = useState(false);
-  const [useManualMath, setUseManualMath] = useState(true); // New: Use manual math solver first!
+  const [useManualMath, setUseManualMath] = useState(true);
   
-  const abortControllerRef = useRef(null);
-
-  // Initialize AI (but we'll use manual math when possible)
-  useEffect(() => {
-    const initAI = async () => {
-      if (!useManualMath) {
-        try {
-          await genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
-          setAiReady(true);
-        } catch (error) {
-          console.error("AI init failed:", error);
-        }
-      }
-    };
-    initAI();
-  }, [useManualMath]);
-
   const handleImageUpload = (event) => {
     const file = event.target.files[0];
     if (file && file.type.startsWith('image/')) {
@@ -116,114 +73,143 @@ const AIAskPanel = ({ onAddToQuizlet }) => {
     }
   };
 
-  // Check if question is a math problem
   const isMathProblem = (text) => {
-    const mathPatterns = [
-      /[\d\+\-\*\/\(\)\^÷×]+/,  // Numbers and operators
-      /\d+\s*[+\-*/÷×]\s*\d+/,   // Basic operations
-      /\([^)]+\)/,                // Parentheses
-    ];
-    return mathPatterns.some(pattern => pattern.test(text));
+    return /[\d\+\-\*\/\(\)\^÷×]/.test(text);
+  };
+
+  const simulateStreaming = async (text) => {
+    const words = text.split(' ');
+    let currentText = '';
+    for (let i = 0; i < words.length; i++) {
+      await new Promise(resolve => setTimeout(resolve, 30));
+      currentText += (i === 0 ? words[i] : ' ' + words[i]);
+      setStreamingAnswer(currentText);
+      setFullAnswer(currentText);
+    }
   };
 
   const askAI = async () => {
-    let userQuestion = showCustom ? customPrompt : (question || "What is shown in this image?");
-    
-    if (mathMode && !showCustom) {
-      userQuestion = `Solve: ${userQuestion}`;
-    }
+    let userQuestion = question || (imagePreview ? "What is shown?" : "Hello");
     
     if (!userQuestion.trim()) {
       alert("Please type a question");
       return;
     }
     
-    // Try manual math solver FIRST (no API, instant!)
-    if (useManualMath && (mathMode || isMathProblem(userQuestion))) {
+    const apiKey = import.meta.env.VITE_OPENROUTER_API_KEY;
+    
+    // CASE 1: Typed math problem
+    if (useManualMath && !imagePreview && (mathMode || isMathProblem(userQuestion))) {
       setIsStreaming(true);
-      setStreamingAnswer("");
-      setFullAnswer("");
-      
-      // Simulate streaming effect
       const mathResult = solveMathProblem(userQuestion);
-      
       if (mathResult.solved) {
-        const answerText = `🧮 **Math Solver Result:**\n\n${mathResult.steps}\n\n✅ Final Answer: **${mathResult.answer}**`;
-        
-        // Stream the answer word by word
-        const words = answerText.split(' ');
-        let currentText = '';
-        for (let i = 0; i < words.length; i++) {
-          await new Promise(resolve => setTimeout(resolve, 15));
-          currentText += (i === 0 ? words[i] : ' ' + words[i]);
-          setStreamingAnswer(currentText);
-          setFullAnswer(currentText);
-        }
-        setIsStreaming(false);
-        return;
+        await simulateStreaming(mathResult.answer);
+      } else {
+        await simulateStreaming("Could not solve");
       }
+      setIsStreaming(false);
+      return;
     }
     
-    // If not a math problem or manual math failed, use AI
-    if (!aiReady && !useManualMath) {
-      alert("AI is still loading. Please wait or enable Manual Math mode.");
+    // CASE 2: Image uploaded - SOLVE IT!
+    if (imagePreview) {
+      if (!apiKey) {
+        setStreamingAnswer("⚠️ Add API key to .env");
+        return;
+      }
+      
+      setIsStreaming(true);
+      setStreamingAnswer("");
+      
+      try {
+        // Tell AI to SOLVE math problems in images
+        const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+          method: "POST",
+          headers: {
+            "Authorization": `Bearer ${apiKey}`,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash",
+            messages: [{
+              role: "user",
+              content: [
+                { 
+                  type: "text", 
+                  text: `Look at this image. If it contains a math problem, CALCULATE and give ONLY the number answer.
+If it's not math, identify the object in ONE word.
+Examples:
+- Image with "6 ÷ 2(1+2)" → 9
+- Image of a dog → Dog
+- Image of "5×3" → 15
+- Image of a flower → Flower
+
+ANSWER ONLY (no extra words):` 
+                },
+                { type: "image_url", image_url: { url: imageDataUrl } }
+              ]
+            }],
+            max_tokens: 20,
+            temperature: 0
+          })
+        });
+        
+        const data = await response.json();
+        let answer = data.choices?.[0]?.message?.content || "?";
+        answer = answer.replace(/answer[:\s]*/i, '').trim();
+        
+        await simulateStreaming(answer);
+        
+      } catch (error) {
+        setStreamingAnswer("Error");
+      } finally {
+        setIsStreaming(false);
+      }
+      return;
+    }
+    
+    // CASE 3: Text question
+    if (!apiKey) {
+      setStreamingAnswer("⚠️ Add API key to .env");
       return;
     }
     
     setIsStreaming(true);
-    setStreamingAnswer("");
-    setFullAnswer("");
-    
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash-lite" });
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          model: "google/gemini-2.0-flash-lite",
+          messages: [
+            { role: "system", content: "Answer directly. Just the fact. No explanations." },
+            { role: "user", content: userQuestion }
+          ],
+          max_tokens: 50,
+          temperature: 0.1
+        })
+      });
       
-      let result;
-      if (imageDataUrl) {
-        const base64Data = imageDataUrl.split(',')[1];
-        const enhancedPrompt = `${userQuestion}\n\nAnswer directly and concisely.`;
-        result = await model.generateContentStream([
-          enhancedPrompt,
-          { inlineData: { mimeType: "image/jpeg", data: base64Data } }
-        ]);
-      } else {
-        result = await model.generateContentStream(userQuestion);
-      }
-      
-      let fullResponse = "";
-      for await (const chunk of result.stream) {
-        const chunkText = chunk.text();
-        fullResponse += chunkText;
-        setStreamingAnswer(fullResponse);
-        setFullAnswer(fullResponse);
-      }
+      const data = await response.json();
+      const answer = data.choices?.[0]?.message?.content || "?";
+      await simulateStreaming(answer);
       
     } catch (error) {
-      if (error.name !== 'AbortError') {
-        let errorMsg = "Error: ";
-        if (error.message.includes("429") || error.message.includes("quota")) {
-          errorMsg = "⚠️ Daily API limit reached. Use Manual Math mode for math problems!";
-        } else {
-          errorMsg += error.message;
-        }
-        setStreamingAnswer(errorMsg);
-        setFullAnswer(errorMsg);
-      }
+      setStreamingAnswer("Error");
     } finally {
       setIsStreaming(false);
     }
   };
 
   const addToQuizlet = () => {
-    const finalQuestion = question.trim() || customPrompt.trim();
+    const finalQuestion = question.trim();
     const finalAnswer = fullAnswer || streamingAnswer;
     
-    if (!finalQuestion) {
-      alert("Please ask a question first");
-      return;
-    }
-    
-    if (!finalAnswer || finalAnswer.includes("typing") || isStreaming) {
-      alert("Please wait for answer to complete");
+    if (!finalQuestion || !finalAnswer || isStreaming) {
+      alert("Please wait for answer");
       return;
     }
     
@@ -232,154 +218,86 @@ const AIAskPanel = ({ onAddToQuizlet }) => {
       question: finalQuestion,
       answer: finalAnswer,
       image: imageDataUrl || null,
-      aiGenerated: !finalAnswer.includes("Math Solver"),
-      mathSolved: finalAnswer.includes("Math Solver"),
+      mathSolved: !isNaN(parseFloat(finalAnswer)),
       createdAt: new Date().toISOString()
     };
     
     onAddToQuizlet(card);
-    
     setQuestion('');
-    setCustomPrompt('');
     setStreamingAnswer('');
     setFullAnswer('');
     setImageDataUrl('');
     setImagePreview('');
-    setShowCustom(false);
     setMathMode(false);
-    alert("✅ Added to your collection!");
+    alert("✅ Saved!");
   };
 
   const clearAnswer = () => {
     setStreamingAnswer('');
     setFullAnswer('');
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
   };
 
   return (
     <div className="ai-panel">
       <div className="panel-header">
-        <h2>🤖 Math Solver + AI Assistant</h2>
-        <p>Math problems solved INSTANTLY with NO API!</p>
+        <h2>⚡ Solve Math from Images!</h2>
+        <p>Upload a photo of ANY math problem - I'll solve it!</p>
       </div>
       
       <div className="panel-content">
-        {/* Manual Math Mode Toggle */}
         <div className="special-modes">
-          <button 
-            className={`mode-btn ${useManualMath ? 'active' : ''}`}
-            onClick={() => setUseManualMath(!useManualMath)}
-            style={{ background: useManualMath ? '#10b981' : '#1e293b' }}
-          >
-            🧮 Manual Math Solver {useManualMath ? 'ON ✓' : 'OFF'}
+          <button className={`mode-btn ${useManualMath ? 'active' : ''}`} onClick={() => setUseManualMath(!useManualMath)}>
+            🧮 Math Solver {useManualMath ? 'ON' : 'OFF'}
           </button>
         </div>
         
         <div className="upload-area" onClick={() => document.getElementById('ai-image-input').click()}>
           {imagePreview ? (
-            <img src={imagePreview} alt="Preview" className="upload-preview" />
+            <>
+              <img src={imagePreview} alt="Preview" className="upload-preview" />
+              <p>✅ Math problem detected! Click Ask to solve</p>
+            </>
           ) : (
             <>
               <span className="upload-icon">📸</span>
-              <p>Click to upload an image (optional)</p>
-              <small>Upload a picture to ask questions about it</small>
+              <p>Upload a photo of a math problem</p>
+              <small>Example: 6 ÷ 2(1+2) written on paper</small>
             </>
           )}
           <input id="ai-image-input" type="file" accept="image/*" onChange={handleImageUpload} style={{ display: 'none' }} />
           {imagePreview && (
-            <button className="remove-image" onClick={(e) => {
-              e.stopPropagation();
+            <button className="remove-image" onClick={() => {
               setImageDataUrl('');
               setImagePreview('');
             }}>✕</button>
           )}
         </div>
         
-        <div className="special-modes">
-          <button 
-            className={`mode-btn ${mathMode ? 'active' : ''}`} 
-            onClick={() => {
-              setMathMode(!mathMode);
-              if (!mathMode) {
-                setShowCustom(false);
-                setQuestion("6 ÷ 2(1+2)");
-              }
-            }}
-          >
-            🧮 Math Solver Mode
-          </button>
-          <button 
-            className="mode-btn" 
-            onClick={() => {
-              setMathMode(false);
-              setShowCustom(false);
-              setQuestion("Identify this object. What is it?");
-            }}
-          >
-            🔍 Identify Object
-          </button>
-          <button 
-            className="mode-btn" 
-            onClick={() => {
-              setMathMode(false);
-              setShowCustom(false);
-              setQuestion("Describe what you see in detail.");
-            }}
-          >
-            📝 Describe Image
-          </button>
-        </div>
-        
-        <div className="question-type">
-          <button className={`type-btn ${!showCustom ? 'active' : ''}`} onClick={() => setShowCustom(false)}>
-            📝 Quick Question
-          </button>
-          <button className={`type-btn ${showCustom ? 'active' : ''}`} onClick={() => setShowCustom(true)}>
-            🎯 Ask Anything (Custom)
-          </button>
-        </div>
-        
-        {!showCustom ? (
-          <input
-            type="text"
-            className="question-input"
-            placeholder="e.g., 6 ÷ 2(1+2) = ? or What animal is this?"
-            value={question}
-            onChange={(e) => setQuestion(e.target.value)}
-          />
-        ) : (
-          <textarea
-            className="question-textarea"
-            placeholder="Ask ANYTHING! Examples:
-• Solve: 6 ÷ 2(1+2)
-• What breed of cat is this?
-• Explain quantum physics simply"
-            value={customPrompt}
-            onChange={(e) => setCustomPrompt(e.target.value)}
-            rows="4"
-          />
-        )}
+        <input
+          type="text"
+          className="question-input"
+          placeholder="Or type a math problem like: 6 ÷ 2(1+2)"
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          onKeyPress={(e) => e.key === 'Enter' && askAI()}
+        />
         
         <div className="button-group">
           <button className="ask-button" onClick={askAI} disabled={isStreaming}>
-            {isStreaming ? "📝 Solving..." : mathMode ? "🧮 Solve Math!" : "🔍 Ask AI"}
+            {isStreaming ? "Solving..." : imagePreview ? "📸 Solve This Image!" : "🧮 Calculate"}
           </button>
-          {streamingAnswer && (
-            <button className="clear-button" onClick={clearAnswer}>🗑️ Clear</button>
-          )}
+          {streamingAnswer && <button className="clear-button" onClick={clearAnswer}>Clear</button>}
         </div>
         
         <div className="ai-answer streaming-area">
           <div className="answer-header">
-            <span>🤖 Answer {isStreaming && <span className="streaming-badge">● LIVE</span>}</span>
-            {streamingAnswer && !isStreaming && !streamingAnswer.includes("Error") && (
+            <span>Answer {isStreaming && <span className="streaming-badge">●</span>}</span>
+            {streamingAnswer && !isStreaming && (
               <button className="add-btn" onClick={addToQuizlet}>+ Save</button>
             )}
           </div>
           <div className="answer-text streaming-text">
-            {streamingAnswer || (isStreaming ? <TypingIndicator /> : "Ask a question... Math problems solved instantly!")}
+            {streamingAnswer || (isStreaming ? <TypingIndicator /> : "Upload a math problem image or type one!")}
             {isStreaming && <span className="cursor-blink">▊</span>}
           </div>
         </div>
@@ -395,45 +313,30 @@ const QuizletCollection = ({ cards, onDeleteCard, onSelectCard, selectedCardId, 
   return (
     <div className="quizlet-panel">
       <div className="panel-header">
-        <h2>📚 My Collection</h2>
-        <p>{cards.length} items saved</p>
+        <h2>📚 Saved ({cards.length})</h2>
       </div>
-      
       <div className="cards-list">
         {cards.length === 0 ? (
-          <div className="empty-state">
-            <p>📖 Nothing saved yet</p>
-            <p>Ask a question and save the answer!</p>
-          </div>
+          <div className="empty-state"><p>📖 Nothing saved</p></div>
         ) : (
           cards.map(card => (
-            <div 
-              key={card.id} 
-              className={`card-item ${selectedCardId === card.id ? 'active' : ''}`}
-              onClick={() => onSelectCard(card.id)}
-            >
+            <div key={card.id} className={`card-item ${selectedCardId === card.id ? 'active' : ''}`} onClick={() => onSelectCard(card.id)}>
               {card.image && <img src={card.image} alt="" className="card-thumb" />}
               <div className="card-info">
-                <div className="card-question">{card.question.substring(0, 50)}...</div>
-                {card.mathSolved && <span className="math-tag">🧮 Math</span>}
-                {card.aiGenerated && !card.mathSolved && <span className="ai-tag">🤖 AI</span>}
+                <div className="card-question">{card.question.substring(0, 40)}...</div>
+                {card.mathSolved && <span className="math-tag">🧮</span>}
               </div>
               <button className="delete-card" onClick={(e) => {
                 e.stopPropagation();
-                if (confirm('Delete this?')) onDeleteCard(card.id);
+                if (confirm('Delete?')) onDeleteCard(card.id);
               }}>🗑️</button>
             </div>
           ))
         )}
       </div>
-      
       {selectedCard && (
         <div className="flashcard-container">
-          <Flashcard 
-            card={selectedCard} 
-            isFlipped={flippedId === selectedCard.id}
-            onFlip={() => onFlip(selectedCard.id)}
-          />
+          <Flashcard card={selectedCard} isFlipped={flippedId === selectedCard.id} onFlip={() => onFlip(selectedCard.id)} />
         </div>
       )}
     </div>
@@ -453,41 +356,27 @@ const App = () => {
     localStorage.setItem('quizletCards', JSON.stringify(cards));
   }, [cards]);
 
-  const addToQuizlet = (card) => {
-    setCards(prev => [card, ...prev]);
-    setSelectedCardId(card.id);
-  };
-
-  const deleteCard = (id) => {
-    setCards(prev => prev.filter(c => c.id !== id));
-    if (selectedCardId === id) {
-      setSelectedCardId(cards[0]?.id || null);
-    }
-  };
-
-  const handleFlip = (id) => {
-    setFlippedId(flippedId === id ? null : id);
-  };
-
   return (
     <div className="app-container">
       <header className="app-header">
-        <h1>📚 Math Solver + AI Assistant</h1>
-        <p>🧮 Math problems solved INSTANTLY without API! 🤖 AI for everything else</p>
+        <h1>📸 Math Problem Solver</h1>
+        <p>Take a photo of ANY math problem - Get the ANSWER instantly!</p>
         <div className="ai-status">
           <span className="status-led ready"></span>
-          Manual Math Solver: ON ✓ | Unlimited use!
+          Ready - Upload math problem image
         </div>
       </header>
-
       <div className="main-layout">
-        <AIAskPanel onAddToQuizlet={addToQuizlet} />
+        <AIAskPanel onAddToQuizlet={(card) => {
+          setCards(prev => [card, ...prev]);
+          setSelectedCardId(card.id);
+        }} />
         <QuizletCollection 
           cards={cards}
-          onDeleteCard={deleteCard}
+          onDeleteCard={(id) => setCards(prev => prev.filter(c => c.id !== id))}
           onSelectCard={setSelectedCardId}
           selectedCardId={selectedCardId}
-          onFlip={handleFlip}
+          onFlip={(id) => setFlippedId(flippedId === id ? null : id)}
           flippedId={flippedId}
         />
       </div>
